@@ -16,10 +16,11 @@ import re
 GENOME_COUNTS_FILEPATH = "genomes/counts/raw_counts_genomes.tsv"
 READ_COUNTS_FILEPATH = "stats/read_counts.tsv"
 ASSEMBLY_STATS_FILEPATH = "stats/combined_contig_stats.tsv"
+# TODO - change from tuple to list
 GTDBTK_TAXONOMY_FILEPATHS = ('genomes/taxonomy_gtdbtk/gtdbtk.bac120.summary.tsv',
                                    'genomes/taxonomy_gtdbtk/gtdbtk.ar122.summary.tsv')
+CAT_TAXONOMY_FILEPATH = 'genomes/taxonomy/taxonomy_names.tsv'
 CHECKM_COMPLETENESS_FILEPATH = 'genomes/checkm/completeness.tsv'
-OUTPUT_TABLE_FILEPATH = "../test_table.tsv"
 
 # Set up the logger
 logging.basicConfig(level=logging.INFO, format='[ %(asctime)s UTC ]: %(levelname)s: %(module)s: %(message)s')
@@ -47,6 +48,7 @@ def load_assembly_stats(assembly_stats_filepath):
     return(assembly_stats)
 
 # Loads and binds rows of GTDBTk taxonomy tables
+# TODO - change from tuple to list
 def load_gtdbtk_taxonomy_table(gtdbtk_classification_filepaths):
     taxonomy_table_list = []
     
@@ -118,6 +120,29 @@ def load_and_parse_gtdbtk_taxonomy_table(gtdbtk_classification_filepaths, resolv
     
     return(taxonomy_table_parsed)
 
+def load_CAT_taxonomy_table(CAT_taxonomy_table_filepath):
+    # Load table
+    taxonomy_table = pd.read_csv(CAT_taxonomy_table_filepath, sep = '\t', header = 0)
+    taxonomy_table.rename(columns = {'# bin': 'MAG_ID',
+                                     'superkingdom': 'Domain',
+                                     'phylum': 'Phylum',
+                                     'class': 'Class',
+                                     'order': 'Order',
+                                     'family': 'Family',
+                                     'genus': 'Genus',
+                                     'species': 'Species'},
+                          inplace = True)
+    taxonomy_table = taxonomy_table[['MAG_ID', 'Domain', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']]
+
+    # Example
+    ## bin	superkingdom	phylum	class	order	family	genus	species
+    #MAG001    Bacteria: 1.00    Nitrospirae: 0.95    Nitrospira: 0.91    Nitrospirales: 0.91    Nitrospiraceae: 0.91    Nitrospira: 0.88    not classified
+
+    # TODO:
+    ## - Get rid of the ': [score]' in the taxonomy entry
+    ## - Resolve 'not classified' as done in the GTDB taxonomy
+
+    return(taxonomy_table)
 
 def load_checkm_completeness_table(checkm_completeness_table_filepath):
 
@@ -156,92 +181,144 @@ def normalize_genome_count_table(genome_count_table, totals_table):
 
 def main(args):
     # Set user variables
-    # TODO - set default if some kind of ATLAS dir variable is set to True
-    # TODO add variable normalization_method
+    atlas_dir = args.atlas_dir
+    output_table_filepath = args.output_file
 
-    genome_counts_filepath = args.genome_counts
-    read_counts_filepath = args.read_counts
-    assembly_stats_filepath = args.assembly_stats
-    gtdbtk_taxonomy_filepaths = args.taxonomy_tables
-    checkm_completeness_filepath = args.checkm_table
-    output_table_filepath = args.output
-
-    # Set sort_features to True if rename_features is True
-    if rename_features is True:
-        sort_features = True
+    # Auto set other filepaths if atlas_dir has been set
+    if atlas_dir is False:
+        genome_counts_filepath = args.genome_counts
+        read_counts_filepath = args.reads_total
+        assembly_stats_filepath = args.reads_assembled
+        CAT_taxonomy_filepath = args.cat_taxonomy_table
+        gtdbtk_taxonomy_filepaths = args.gtdb_taxonomy_tables
+        checkm_completeness_filepath = args.checkm_table
+    else:
+        genome_counts_filepath = os.path.join(atlas_dir, GENOME_COUNTS_FILEPATH)
+        read_counts_filepath = os.path.join(atlas_dir, READ_COUNTS_FILEPATH)
+        # TODO - add support for assembly_stats_filepath
+        assembly_stats_filepath = False
+        # assembly_stats_filepath = os.path.join(atlas_dir, ASSEMBLY_STATS_FILEPATH)
+        gtdbtk_taxonomy_filepaths = []
+        for entry in GTDBTK_TAXONOMY_FILEPATHS:
+            gtdbtk_taxonomy_filepaths.append(os.path.join(atlas_dir, entry))
+        # TODO - add support for CAT taxonomy filepath
+        CAT_taxonomy_filepath = False
+        # CAT_taxonomy_filepath = os.path.join(atlas_dir, CAT_TAXONOMY_FILEPATH)
+        checkm_completeness_filepath = os.path.join(atlas_dir, CHECKM_COMPLETENESS_FILEPATH)
 
     # Startup messages
     logger.info('Running ' + os.path.basename(sys.argv[0]))
-    logger.info('Feature table filepath: ' + feature_table_filepath)
-    logger.info('Representative sequences filepath: ' + str(rep_seq_filepath))
-    logger.info('Taxonomy filepath: ' + str(taxonomy_filepath))
-    logger.info('Feature ID colname: ' + str(feature_id_colname))
-    logger.info('Sort Feature IDs roughly by relative abundance?: ' + str(sort_features))
-    logger.info('Rename Feature IDs sequentially?: ' + str(rename_features))
+    logger.info('ATLAS directory: ' + str(atlas_dir))
+    logger.info('Output filepath: ' + str(output_table_filepath))
+    logger.info('Genome counts filepath: ' + str(genome_counts_filepath))
+    logger.info('Read counts filepath: ' + str(read_counts_filepath))
+    logger.info('Assembly stats filepath: ' + str(assembly_stats_filepath))
+    # TODO - somehow print out the list
+    logger.info('GTDB taxonomy filepaths: ' + ', '.join(list(gtdbtk_taxonomy_filepaths)))
+    logger.info('CAT taxonomy filepath: ' + str(CAT_taxonomy_filepath))
+    logger.info('CheckM completeness filepath: ' + str(checkm_completeness_filepath))
+
+    # TODO - check the integrity of the input files/folders
 
     # Load genome counts
     genome_counts = pd.read_csv(genome_counts_filepath, sep='\t', header=0)
     genome_counts.rename(columns={'Sample': 'MAG_ID'}, inplace=True)
 
-    # Load supplementary data
-    total_read_counts = load_read_counts(read_counts_filepath)
-    assembly_stats = load_assembly_stats(assembly_stats_filepath)
-    taxonomy_table = load_and_parse_gtdbtk_taxonomy_table(gtdbtk_taxonomy_filepaths, resolve = True)
-    checkm_completeness_table = load_checkm_completeness_table(checkm_completeness_filepath)
-
     # Normalize the counts
-    if normalization_method == 'total':
+    if (read_counts_filepath is not False) and (assembly_stats_filepath is not False):
+        logger.error('Cannot provide both -r and -R; please be clear on which normalization method you want. Exiting...')
+        sys.exit(1)
+    elif read_counts_filepath is not False:
+        # Then normalize to total counts
+        total_read_counts = load_read_counts(read_counts_filepath)
+        logger.info('Normalizing MAG abundances by total read counts')
         genome_counts_normalized = normalize_genome_count_table(genome_counts, total_read_counts)
-    elif normalization_method == 'assembled':
+    elif assembly_stats_filepath is not False:
+        # Then normalize to assembled reads
+        assembly_stats = load_assembly_stats(assembly_stats_filepath)
+        logger.info('Normalizing MAG abundances by assembled read counts')
         genome_counts_normalized = normalize_genome_count_table(genome_counts, assembly_stats)
     else:
-        # TODO - make this statement more informative
-        logger.error('Selected normalization method is not valid. Exiting...')
+        logger.error('At least one of -r and -R MUST be provided. Exiting...')
         sys.exit(1)
 
-    # Bind on other info
-    genome_counts_normalized = pd.merge(genome_counts_normalized, taxonomy_table,
-                                        how = 'left', on = 'MAG_ID',
-                                        sort = False, validate = 'one_to_one')
-    genome_counts_normalized = pd.merge(genome_counts_normalized, checkm_completeness_table,
-                                        how = 'left', on = 'MAG_ID',
-                                        sort = False, validate = 'one_to_one')
+    # Bind on taxonomy
+    if (CAT_taxonomy_filepath is not False) and (gtdbtk_taxonomy_filepaths is not False):
+        logger.error('Must specify only -T or -t, or neither. You specified both flags. Exiting...')
+        sys.exit(1)
+    elif gtdbtk_taxonomy_filepaths is not False:
+        # Load and add taxonomy
+        logger.info('Adding GTDB taxonomy info to the table')
+        # TODO - remove tuple requirement and make the function receive lists instead
+        taxonomy_table = load_and_parse_gtdbtk_taxonomy_table(tuple(gtdbtk_taxonomy_filepaths), resolve=True)
+        # TODO - expose 'resolve' setting to user
+        genome_counts_normalized = pd.merge(genome_counts_normalized, taxonomy_table,
+                                            how = 'left', on = 'MAG_ID',
+                                            sort = False, validate = 'one_to_one')
 
-    # Sort by taxonomy
-    genome_counts_normalized = genome_counts_normalized.sort_values(
-        by = ['Domain', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species', 'MAG_ID'])
+        # Sort by taxonomy
+        logger.info('Sorting table by taxonomy')
+        genome_counts_normalized = genome_counts_normalized.sort_values(
+            by=['Domain', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species', 'MAG_ID'])
+    elif CAT_taxonomy_filepath is not False:
+        # Load and add taxonomy
+        logger.info('Adding CAT taxonomy info to the table')
+        taxonomy_table = load_CAT_taxonomy_table(CAT_taxonomy_filepath)
+        # TODO - add 'resolve' setting once available in the function itself
+        genome_counts_normalized = pd.merge(genome_counts_normalized, taxonomy_table,
+                                            how='left', on='MAG_ID',
+                                            sort=False, validate='one_to_one')
+
+        # Sort by taxonomy
+        logger.info('Sorting table by taxonomy')
+        genome_counts_normalized = genome_counts_normalized.sort_values(
+            by=['Domain', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species', 'MAG_ID'])
+
+    # Add on CheckM info
+    if checkm_completeness_filepath is not False:
+        # Load and add CheckM completeness info
+        logger.info('Adding CheckM completeness info to the table')
+        checkm_completeness_table = load_checkm_completeness_table(checkm_completeness_filepath)
+        genome_counts_normalized = pd.merge(genome_counts_normalized, checkm_completeness_table,
+                                            how = 'left', on = 'MAG_ID',
+                                            sort = False, validate = 'one_to_one')
 
     # Write output
     logger.info('Writing output table')
     pd.DataFrame.to_csv(genome_counts_normalized, output_table_filepath, sep = '\t', index = False)
 
-    logger.info('Done.')
+    logger.info(os.path.basename(sys.argv[0]) + ': done.')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Creates a TSV-format table of MAG abundances from ATLAS2.'
+        description='Creates a TSV-format table of MAG abundances from ATLAS2. '
                     'Copyright Jackson M. Tsuji, Neufeld Research Group, 2019.')
 
-    # TODO - make these parsers correct
-    parser.add_argument('-f', '--feature_table', required=True,
-                        help='The path to the input TSV feature table file.')
-    parser.add_argument('-s', '--rep_seqs', required=False, default=False,
-                        help='The path to the input FastA representative sequences file. Sequences will be added as the '
-                             '"ReprSequences" column. You can optionally omit this flag and not have sequences added to the table.')
-    parser.add_argument('-t', '--taxonomy', required=False, default=False,
-                        help='The path to the input taxonomy file. Taxonomy will be added as the "Consensus.Lineage" column. '
-                             'You can optionally omit this flag and not have taxonomy added to the table.')
-    parser.add_argument('-o', '--output_feature_table', required=True,
-                        help='The path to the output TSV feature table.')
-    parser.add_argument('-N', '--feature_id_colname', required=False, default='Feature ID',
-                        help='The name of the first column of the output ASV table. [Default: "Feature ID"]')
-    parser.add_argument('-S', '--sort_features', required=False, action='store_true',
-                        help='Optionally sort Feature IDs roughly based on overall abundance.')
-    parser.add_argument('-R', '--rename_features', required=False, action='store_true',
-                        help='Optionally rename the Feature IDs sequentially, roughly based on overall abundance. '
-                             'Automatically sets --sort_features')
-    # TODO - add optional flag to parse taxonomy into 7 ranks
-    # TODO - add option to auto-detect if a QZA file is provided instead of the unpackaged file. Deal with the converstions. Same for if a BIOM file is provided.
+    parser.add_argument('-o', '--output_file', required=True,
+                        help='The path to the output TSV-format MAG table')
+    parser.add_argument('-a', '--atlas_dir', required=False, default = False,
+                        help='The path to the ATLAS directory. If you set this, it will set all five inputs file '
+                             'flags (-g, -r, -s, -c, -t) automatically.')
+    parser.add_argument('-g', '--genome_counts', required=False, default=False,
+                        help='The path to the genome counts file "raw_counts_genomes.tsv" generated by ATLAS.')
+    parser.add_argument('-r', '--reads_total', required=False, default=False,
+                        help='The path to the total read counts file "read_counts.tsv" generated by ATLAS. '
+                        'Specify this flag if you want to normalize to the total number of unassembled reads. '
+                        'Must specify either this or -R.')
+    parser.add_argument('-R', '--reads_assembled', required=False, default=False,
+                        help='The path to the assembly stats file "combined_contig_stats.tsv" generated by ATLAS.'
+                             'Specify this flag if you want to normalize to the number of assembled reads. '
+                             'Must specify either this or -r.')
+    parser.add_argument('-t', '--cat_taxonomy_table', required=False, default=False,
+                        help='Paths to the classification output file from the CAT classifier, '
+                             'e.g., "taxonomy_names.tsv". Cannot specify both this and -T')
+    parser.add_argument('-T', '--gtdb_taxonomy_tables', required=False, default=False, action='append',
+                        help='Paths to the two classification output files from the GTDBTk classifier, '
+                             'e.g., "gtdbtk.ar122.summary.tsv" and "gtdbtk.bac120.summary.tsv". '
+                             'You have to specify each one separately and use this flag twice. '
+                             'Cannot specify both this and -t.')
+    parser.add_argument('-c', '--checkm_table', required=False, default=False,
+                        help='The path to the checkm file "completeness.tsv" generated by ATLAS.')
 
     command_line_args = parser.parse_args()
     main(command_line_args)
