@@ -1,5 +1,5 @@
-# atlas2-extensions
-Extensions to the ATLAS pipeline, version 2 and higher
+# atlas2-helpers
+Scripts for post-processing of output from the ATLAS pipeline, version 2 and higher
 
 Copyright Jackson M. Tsuji, 2019
 
@@ -7,9 +7,9 @@ Copyright Jackson M. Tsuji, 2019
 
 ## Overview
 
-[ATLAS](https://github.com/pnnl/atlas) is an open-source and extendable pipeline for 
-metagenomic analysis. This repo contains a collection of scripts to apply custom 
-extensions on top of the existing ATLAS framework for personal analyses.
+[ATLAS](https://github.com/metagenome-atlas/atlas) is an open-source and extendable pipeline for 
+metagenomic analysis. This repo contains a collection of helper scripts to perform post-processing 
+on ATLAS output
 
 ## Scripts
 
@@ -18,4 +18,4 @@ line. Try running the script with the `-h` flag to get usage and install instruc
 
 Scripts contained in this repo include:
 - `generate_MAG_table.py`: generates something like an OTU-table (in amplicon sequencing) 
-for genome bins output by ATLAS
+for genome bins output by ATLAS. Requires Python3 and the pandas package.
