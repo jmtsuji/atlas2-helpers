@@ -25,6 +25,7 @@ logging.basicConfig(level=logging.INFO, format='[ %(asctime)s UTC ]: %(levelname
 logging.Formatter.converter = time.gmtime
 logger = logging.getLogger(__name__)
 
+# Load the read_counts.tsv table, make custom read count stat, and get key columns
 def load_read_counts(read_counts_filepath):
     # Import read totals and filter to QC only with pe and se reads
     read_counts = pd.read_csv(read_counts_filepath, sep = '\t', header = 0)
@@ -37,6 +38,7 @@ def load_read_counts(read_counts_filepath):
 
     return(read_counts)
 
+# Load the combined_contig_stats.tsv table and get key columns
 def load_assembly_stats(assembly_stats_filepath):
     # Import assembly stats and filter to assembled reads column
     assembly_stats = pd.read_csv(assembly_stats_filepath, sep = '\t', header = 0)
@@ -45,7 +47,7 @@ def load_assembly_stats(assembly_stats_filepath):
 
     return(assembly_stats)
 
-# Loads and binds rows of GTDBTk taxonomy tables
+# Load and bind rows of GTDBTk taxonomy tables
 # TODO - change from tuple to list
 def load_gtdbtk_taxonomy_table(gtdbtk_classification_filepaths):
     taxonomy_table_list = []
@@ -59,14 +61,15 @@ def load_gtdbtk_taxonomy_table(gtdbtk_classification_filepaths):
     taxonomy_table = pd.concat(taxonomy_table_list)
     return(taxonomy_table)
 
+# Parse a single GTDBTk taxonomy entry
 def parse_gtdbtk_taxonomy_entry(taxonomy_entry, resolve = True):
     # EXAMPLE: 'd__Bacteria;p__Actinobacteriota;c__Acidimicrobiia;o__Microtrichales;f__;g__;s__'
     
     taxonomy_split = str(taxonomy_entry).split(sep = ';')
     if len(taxonomy_split) != 7:
-        print('Taxonomy entry is ' + str(len(taxonomy_split)) + ' long, not 7 as expected. Exiting...')
-        print('Entry was: ' + str(taxonomy_entry))
-        # sys.exit(1)
+        logger.error('Taxonomy entry is ' + str(len(taxonomy_split)) + ' long, not 7 as expected. Exiting...')
+        loger.error('Entry was: ' + ', '.join(taxonomy_entry))
+        sys.exit(1)
 
     # Remove header pieces
     # TODO - confirm they are in the right order (d, p, c, o, f, g, s)
@@ -74,8 +77,6 @@ def parse_gtdbtk_taxonomy_entry(taxonomy_entry, resolve = True):
 
     # Fill in empty parts, if they exist
     if '' in taxonomy_split and resolve is True:
-        # print('Resolving ambiguities')
-
         # Get the positions of the empty spots
         empty_taxa = []
         for taxonomy_level in taxonomy_split:
@@ -89,9 +90,9 @@ def parse_gtdbtk_taxonomy_entry(taxonomy_entry, resolve = True):
         first_empty_taxon = empty_taxa.index(True)
 
         if False in empty_taxa[first_empty_taxon:]:
-            print('There seems to be an empty entry in the middle of your taxonomy levels. Cannot resolve. Exiting...')
-            print('Entry was: ' + str(taxonomy_entry))
-            # sys.exit(1)
+            logger.error('There seems to be an empty entry in the middle of your taxonomy levels. Cannot resolve. Exiting...')
+            logger.error('Entry was: ' + ', '.join(taxonomy_entry))
+            sys.exit(1)
 
         filler_entry = 'Unresolved_' + taxonomy_split[(first_empty_taxon-1)]
 
@@ -100,6 +101,7 @@ def parse_gtdbtk_taxonomy_entry(taxonomy_entry, resolve = True):
 
     return(taxonomy_split)
 
+# Load and parse any number of GTDBTk taxonomy tables (recommended: 2 tables, bacteria and archaea)
 def load_and_parse_gtdbtk_taxonomy_table(gtdbtk_classification_filepaths, resolve = True):
     # Load the table
     taxonomy_table = load_gtdbtk_taxonomy_table(gtdbtk_classification_filepaths)
@@ -118,9 +120,73 @@ def load_and_parse_gtdbtk_taxonomy_table(gtdbtk_classification_filepaths, resolv
     
     return(taxonomy_table_parsed)
 
-def load_CAT_taxonomy_table(CAT_taxonomy_table_filepath):
+# Parse a single taxonomy entry
+def parse_CAT_taxonomy_cell(CAT_taxonomy_cell):
+    # e.g., 'Nitrospira: 0.88' -> 'Nitrospira'
+    # e.g., 'not classified' -> 'not classified' (no change)
+
+    if (CAT_taxonomy_cell == 'not classified') or (CAT_taxonomy_cell == 'NA'):
+        logger.debug('Skipping empty taxonomy entry')
+    elif CAT_taxonomy_cell.find(':') == -1:
+        logger.warning('The taxonomy cell "' + CAT_taxonomy_cell + '" seems to be missing the expected colon. ' +
+                           'Cannot parse this properly, but will continue on nevertheless, leaving as-is')
+    else:
+        # Split by the colon
+        cell_split = CAT_taxonomy_cell.split(sep=':')
+        if len(cell_split) != 2:
+            logger.warning('The taxonomy cell "' + CAT_taxonomy_cell + '" seems to not have the expected layout. ' +
+                           'Will continue on and leave the cell as-is.')
+        else:
+            CAT_taxonomy_cell = cell_split[0]
+
+    return(CAT_taxonomy_cell)
+
+# Parse one row of length-7 CAT taxonomy entries
+# Input a list of taxonomy entries (string list) and output a list of the corrected entries
+def parse_CAT_taxonomy_row(CAT_taxonomy_row, resolve = True):
+    # E.g., Bacteria: 1.00    Nitrospirae: 0.95    Nitrospira: 0.91    Nitrospirales: 0.91    Nitrospiraceae: 0.91    not classified    not classified
+    # Goal: Bacteria    Nitrospirae    Nitrospira    Nitrospirales    Nitrospiraceae    Unresolved_Nitrospiraceae    Unresolved_Nitrospiraceae
+
+    # Correct each cell
+    CAT_taxonomy_row = list(map(parse_CAT_taxonomy_cell, CAT_taxonomy_row))
+
+    # Fill in empty parts, if they exist
+    if ('not classified' in CAT_taxonomy_row) or ('NA' in CAT_taxonomy_row) and resolve is True:
+
+        # Get the positions of the empty spots
+        empty_taxa = []
+        for taxonomy_level in CAT_taxonomy_row:
+            if (taxonomy_level == 'not classified') or (taxonomy_level == 'NA'):
+                empty_taxa.append(True)
+            else:
+                empty_taxa.append(False)
+
+        # Get the numeric index of the first empty taxon
+        # See https://stackoverflow.com/a/9542768, accessed Sept. 18, 2019
+        first_empty_taxon = empty_taxa.index(True)
+
+        # Only look at entries 1-6 for the initial check; sometimes CAT will leave a species level classification in at position 7
+        # But CAT does some odd things with taxonomy sometimes, so there might be a difficult to parse entry as well.
+        if False in empty_taxa[first_empty_taxon:len(empty_taxa)-1]:
+            # TODO - is there a more elegant way to handle these entries?
+            logger.warning('There seems to be an empty entry in the middle of one of your taxonomy levels. Cannot resolve...')
+            logger.warning('Entry will remain as: "' + ', '.join(CAT_taxonomy_row) + '"')
+        else:
+            filler_entry = 'Unresolved_' + CAT_taxonomy_row[(first_empty_taxon - 1)]
+            # Fill in entries up to 6 with the filler entry
+            for taxonomy_level_index in range(first_empty_taxon, 6):
+                CAT_taxonomy_row[taxonomy_level_index] = filler_entry
+            # Also fill in entry 7 (remember, zero index!) with the filler if there is no special entry there
+            if empty_taxa[6] is True:
+                CAT_taxonomy_row[6] = filler_entry
+
+    return(CAT_taxonomy_row)
+
+# Load and parse the CAT taxonomy table
+def load_and_parse_CAT_taxonomy_table(CAT_taxonomy_table_filepath, resolve = True):
     # Load table
-    taxonomy_table = pd.read_csv(CAT_taxonomy_table_filepath, sep = '\t', header = 0)
+    # Need 'keep_default_na = False' for the support functions to work.
+    taxonomy_table = pd.read_csv(CAT_taxonomy_table_filepath, sep = '\t', header = 0, keep_default_na = False)
     taxonomy_table.rename(columns = {'# bin': 'MAG_ID',
                                      'superkingdom': 'Domain',
                                      'phylum': 'Phylum',
@@ -136,12 +202,19 @@ def load_CAT_taxonomy_table(CAT_taxonomy_table_filepath):
     ## bin	superkingdom	phylum	class	order	family	genus	species
     #MAG001    Bacteria: 1.00    Nitrospirae: 0.95    Nitrospira: 0.91    Nitrospirales: 0.91    Nitrospiraceae: 0.91    Nitrospira: 0.88    not classified
 
-    # TODO:
-    ## - Get rid of the ': [score]' in the taxonomy entry
-    ## - Resolve 'not classified' as done in the GTDB taxonomy
+    # Now parse the table
+    parsed_rows = []
+    for index, taxonomy_table_row in taxonomy_table.iterrows():
+        parsed_row = [taxonomy_table_row[0]] + parse_CAT_taxonomy_row(taxonomy_table_row[1:8], resolve = resolve)
+        parsed_rows.append(parsed_row)
+
+    taxonomy_table = pd.DataFrame.from_records(parsed_rows, columns =
+                                               ['MAG_ID', 'Domain', 'Phylum', 'Class',
+                                                'Order', 'Family', 'Genus', 'Species'])
 
     return(taxonomy_table)
 
+# Load CheckM completeness data and get key columns
 def load_checkm_completeness_table(checkm_completeness_table_filepath):
 
     # Load CheckM data
@@ -153,14 +226,13 @@ def load_checkm_completeness_table(checkm_completeness_table_filepath):
 
     return(checkm_completeness_table)
 
+# Normalize the genome count table to a particular table of total reads
 def normalize_genome_count_table(genome_count_table, totals_table):
     normalized_totals = []
     
     for row_tuple in totals_table.itertuples(index = False):
         sample_ID = row_tuple[0]
         total_reads = row_tuple[1]
-
-        #print(sample_ID + ': ' + str(total_reads))
 
         normalized_totals.append(genome_count_table[sample_ID] / total_reads * 100)
         #count_table_normalized[sample_ID] = count_table[sample_ID] / total_reads * 100
@@ -264,8 +336,8 @@ def main(args):
     elif CAT_taxonomy_filepath is not False:
         # Load and add taxonomy
         logger.info('Adding CAT taxonomy info to the table')
-        taxonomy_table = load_CAT_taxonomy_table(CAT_taxonomy_filepath)
-        # TODO - add 'resolve' setting once available in the function itself
+        taxonomy_table = load_and_parse_CAT_taxonomy_table(CAT_taxonomy_filepath, resolve=True)
+        # TODO - expose 'resolve' setting to the user
         genome_counts_normalized = pd.merge(genome_counts_normalized, taxonomy_table,
                                             how='left', on='MAG_ID',
                                             sort=False, validate='one_to_one')
