@@ -1,7 +1,9 @@
 # atlas2-helpers
+[![GitHub release](https://img.shields.io/badge/Version-0.1.0-blue.svg)](https://github.com/jmtsuji/atlas2-helpers)
+
 Scripts for post-processing of output from the ATLAS pipeline, version 2 and higher
 
-Copyright Jackson M. Tsuji, 2019
+Copyright Jackson M. Tsuji, 2020
 
 **NOTE: These scripts are still in progress - early development only.
 
@@ -18,4 +20,5 @@ line. Try running the script with the `-h` flag to get usage and install instruc
 
 Scripts contained in this repo include:
 - `generate_MAG_table.py`: generates something like an OTU-table (in amplicon sequencing) 
-for genome bins output by ATLAS. Requires Python3 and the pandas package.
+for genome bins output by ATLAS. Requires Python3 and the pandas package. 
+Default settings are optimized for ATLAS 2.2.0 and higher.
