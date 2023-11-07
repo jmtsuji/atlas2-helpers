@@ -20,4 +20,5 @@ Scripts contained in this repo include:
 - `generate_MAG_table.py`: generates something like an OTU-table (in amplicon sequencing) 
 for genome bins output by ATLAS. Requires Python3 and the pandas package. 
 Default settings are optimized for ATLAS 2.14 (approx.) and higher.
-NOTE: revert to version 0.1.0 for use with older ATLAS2 versions (e.g., v2.2.0) 
+NOTE: revert to version 0.1.0 for use with older ATLAS2 versions (e.g., v2.2.0).
+Requires at least Python 3.6.
